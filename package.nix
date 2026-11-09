@@ -16,7 +16,7 @@
   lib,
   stdenvNoCC,
   python3,
-  dbus,
+  glib,
   # pinned upstream source, set from the flake input
   src,
   version,
@@ -25,7 +25,7 @@
   led ? "chromeos:white:power",
   onSeconds ? 0.25,
   offSeconds ? 0.25,
-  # safety net: never blink longer than this, even if a stop signal is missed
+  # safety net: never blink longer than this, even if finger-needed never turns false
   maxBlinkSeconds ? 60,
 }:
 
@@ -50,8 +50,8 @@ stdenvNoCC.mkDerivation {
                      'ON_S, OFF_S = ${toString onSeconds}, ${toString offSeconds}' \
       --replace-fail 'MAX_BLINK_S = 60' \
                      'MAX_BLINK_S = ${toString maxBlinkSeconds}' \
-      --replace-fail '["dbus-monitor",' \
-                     '["${lib.getExe' dbus "dbus-monitor"}",'
+      --replace-fail '["gdbus",' \
+                     '["${lib.getExe' glib "gdbus"}",'
   '';
 
   installPhase = ''
