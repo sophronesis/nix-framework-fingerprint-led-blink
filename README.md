@@ -5,29 +5,35 @@ blink the **power-button LED** of a Framework laptop while fprintd waits for
 your finger (sudo, login, lock screen, polkit, enroll).
 
 On the Framework 16 the fingerprint reader is inside the power button, but
-nothing tells you when it actually expects a touch. Upstream's small root
-service watches the system bus for fprintd's `VerifyStart` / `EnrollStart` and
-blinks `/sys/class/leds/chromeos:white:power` until the matching stop signal,
-a final status, `Release`, or a 60 s safety timeout. The LED is always handed
-back to the EC (`chromeos-auto` trigger). See upstream for the demo and details.
+nothing tells you when it actually expects a touch. Upstream's small service
+subscribes to fprintd's own signals (`gdbus monitor --dest net.reactivated.Fprint`,
+sender verified by the bus) and blinks `/sys/class/leds/chromeos:white:power`
+while fprintd's `finger-needed` property is `true` and no finger is on the
+sensor yet (`finger-present`), with a 60 s safety timeout.
+The LED is always handed back to the EC (`chromeos-auto` trigger). See upstream
+for the demo and details.
 
 This repo does not carry a copy of the script. It pulls upstream as a pinned
 flake input and:
 
-- packages it (`patchShebangs` for python, absolute `dbus-monitor` path)
+- packages it (`patchShebangs` for python, absolute `gdbus` path)
 - turns upstream's tunable constants into override parameters / module options
-- ships a NixOS module with a hardened systemd unit (no capabilities, private
-  network/devices, read-only system, syscall filter)
+- ships a NixOS module with an unprivileged, hardened systemd unit
+  (`DynamicUser` in group `fprint-led`, no capabilities, private
+  network/devices, read-only system, syscall filter) plus a udev rule that lets
+  that group write only the LED's `trigger`, `brightness` and `multi_intensity`
 
-Tested on a Framework Laptop 16 (Ryzen 9 7940HS, Goodix `27c6:609c`), NixOS
-unstable, kernel 7.3.
+Originally written by [@sophronesis](https://github.com/sophronesis) for the
+first (root) version of upstream and tested on a Framework Laptop 16 (Ryzen 9
+7940HS, Goodix `27c6:609c`), NixOS unstable, kernel 7.3. This fork, kept by
+the upstream maintainer, tracks the current unprivileged version.
 
 ## Usage
 
 ```nix
 # flake.nix
 inputs.nix-framework-fingerprint-led-blink = {
-  url = "github:sophronesis/nix-framework-fingerprint-led-blink";
+  url = "github:alejandroqh/nix-framework-fingerprint-led-blink";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
@@ -49,7 +55,7 @@ Nothing blinks until fprintd actually asks for a finger: enroll one with
 | option | default | |
 |---|---|---|
 | `enable` | `false` | |
-| `led` | `"chromeos:white:power"` | name under `/sys/class/leds` |
+| `led` | `"chromeos:white:power"` | name under `/sys/class/leds`; falls back to `chromeos:multicolor:power` (older FW13) if missing |
 | `onSeconds` | `0.25` | |
 | `offSeconds` | `0.25` | |
 | `maxBlinkSeconds` | `60` | safety net if a stop signal is missed |
@@ -68,17 +74,23 @@ pkgs.framework-fingerprint-led-blink.override {
 }
 ```
 
-or `nix build github:sophronesis/nix-framework-fingerprint-led-blink`.
+or `nix build github:alejandroqh/nix-framework-fingerprint-led-blink`.
 
-## Testing without a finger
+## Testing
 
-The watcher only looks at method calls on the bus, not their result, so an
-unclaimed call is enough to see it work:
+The watcher only reacts to fprintd's own `finger-needed` property, so it needs
+a real prompt (an unclaimed `VerifyStart` no longer makes it blink):
 
 ```bash
-B=(busctl call --system net.reactivated.Fprint /net/reactivated/Fprint/Device/0 net.reactivated.Fprint.Device)
-"${B[@]}" VerifyStart s any   # fails with "not claimed" - LED starts blinking anyway
-"${B[@]}" Release             # LED goes back to the EC
+sudo -k; sudo true   # watch the power button before touching the sensor
+```
+
+Check that it runs unprivileged and the udev rule applied:
+
+```bash
+systemctl show -p User,MainPID framework-fingerprint-led-blink
+ls -lL /sys/class/leds/chromeos:white:power/{trigger,brightness}   # root fprint-led, rw-rw-r--
+systemd-analyze security framework-fingerprint-led-blink
 ```
 
 ## Troubleshooting
@@ -104,6 +116,8 @@ nix flake check
 Every substitution in `package.nix` uses `--replace-fail`, so if upstream
 changes one of the patched lines the build breaks instead of silently dropping
 a setting.
+The build also runs upstream's unit tests against the patched script, for
+both the default and the tuned package.
 
 ## License
 

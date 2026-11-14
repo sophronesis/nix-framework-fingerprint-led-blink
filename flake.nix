@@ -22,7 +22,7 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      # upstream has no releases yet
+      # tracks upstream main, not its v* tags
       d = upstream.lastModifiedDate;
       version = "0-unstable-${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
       srcArgs = {
